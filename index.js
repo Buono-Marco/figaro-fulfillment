@@ -10,6 +10,7 @@ require("dotenv").config();
 const fs = require("fs");
 
 process.env.DEBUG = "dialogflow:*"; // enables lib debugging statement
+
 const serviceAccount = JSON.parse(
   fs.readFileSync("your_service_account.json", "utf8")
 ); // Starts with {"type": "service_account",...
@@ -27,40 +28,34 @@ const serviceAccountAuth = new google.auth.JWT({
 
 // Crea il client Google Sheets
 const sheets = google.sheets({ version: "v4", auth: serviceAccountAuth });
-const spreadsheetId = config.spreadsheetId; // looks like "3CCzbMLS990lKVetxD--5nwa_LMPAUIvCxSSldQfj5T2";
-
 // Crea il client Google Calendar
 const calendar = google.calendar({ version: "v3", auth: serviceAccountAuth });
 
 // Enter your calendar ID below and service account JSON below, see https://github.com/dialogflow/bike-shop/blob/master/README.md#calendar-setup
 const calendarId = config.calendarId; // looks like "6ujc6j6rgfk02cp02vg6h38cs0@group.calendar.google.com"
+const spreadsheetId = config.spreadsheetId; // looks like "3CCzbMLS990lKVetxD--5nwa_LMPAUIvCxSSldQfj5T2";
 
 // ************************** Start Variabili attività ************************************
 // ****************************************************************************************
 
 // tempo massimo dalla data corrente (ora) per effettuare la prenotazione
 const showPickerDays = 30;
-
 // tempo minimo dalla data corrente (ora) per effettuare la prenotazione
 const minutiAnticipo = 60; // 1 ora
-
 // Definisci i giorni di chiusura (esempio: Domenica e Lunedì)
 const giorniDiChiusura = [0, 1];
-
 // Definisce i range orari
 const rangeOrari = {
   Mattina: { start: "09:00", end: "13:00" },
   Pomeriggio: { start: "15:00", end: "20:00" },
   // Aggiungi altri range orari se necessario
 };
-
 // Definisce la durata dei servizi
 const durataServizi = {
   "Taglio capelli": 45,
   "Rasatura barba": 15,
   // Aggiungi altri servizi e le loro durate qui
 };
-
 const timezone = "Europe/Rome";
 
 // ************************** End Variabili attività ************************************
@@ -69,156 +64,36 @@ const timezone = "Europe/Rome";
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
   (request, response) => {
     const agent = new WebhookClient({ request, response });
-    console.log(
-      "Dialogflow Request headers: " + JSON.stringify(request.headers)
-    );
-    console.log("Dialogflow Request body: " + JSON.stringify(request.body));
 
     function replaceTimeInDate(date, time) {
-      console.log(
-        "****************************** [start replaceTimeInDate] ******************************"
-      );
-      console.log(
-        "****************************** [replaceTimeInDate - date:" +
-          date.format() +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [replaceTimeInDate - time:" +
-          time.format() +
-          "] ******************************"
-      );
-
-      const normalizedTime = normalizzaOrario(time);
-
       // Applica l'ora, i minuti e i secondi da `time` a `date`
-      date.hour(normalizedTime.hour());
-      date.minute(normalizedTime.minute());
-      date.second(normalizedTime.second());
+      date.hour(time.hour());
+      date.minute(time.minute());
+      date.second(time.second());
 
       // Restituisce la nuova data in formato ISO string, mantenendo il fuso orario "Europe/Rome"
-      const result = date;
-      console.log(
-        "****************************** [replaceTimeInDate - result:" +
-          result.format() +
-          "] ******************************"
-      );
-      return result;
-    }
-
-    // Normalizza l'orario. Se ad es. l'utente intende le 4 PM ma DialogFlow lo interpreta come 4 AM
-    function normalizzaOrario(time) {
-      console.log(
-        "****************************** [start normalizzaOrario] ******************************"
-      );
-      console.log(
-        "****************************** [normalizzaOrario - time:" +
-          time.format() +
-          "] ******************************"
-      );
-      const hour = time.hour();
-
-      console.log(
-        "****************************** [normalizzaOrario - hour:" +
-          hour +
-          "] ******************************"
-      );
-
-      // Trasforma l'orario solo se è fuori dall'orario di apertura
-      if (hour >= 21 || hour < 9) {
-        // Calcola la nuova ora basandosi sulla differenza. E.g., 21 diventa 09, 22 diventa 10, ecc.
-        let newHour = (hour + 12) % 24;
-        console.log(
-          "****************************** [normalizzaOrario - newHour:" +
-            newHour +
-            "] ******************************"
-        );
-
-        // Applica la nuova ora
-        time.hour(newHour);
-      }
-
-      console.log(
-        "****************************** [normalizzaOrario - time:" +
-          time.format() +
-          "] ******************************"
-      );
-
-      return time;
+      return date;
     }
 
     function calcolaDurataTotale(servizi) {
-      console.log(
-        "****************************** [start calcolaDurataTotale] ******************************"
+      // Restituisce la durata totale in minuti
+      return servizi.reduce(
+        (totale, servizio) => totale + durataServizi[servizio],
+        0
       );
-      let durataTotale = servizi.reduce((totale, servizio) => {
-        //return servizi.reduce((totale, servizio) => {
-        return totale + (durataServizi[servizio] || 0);
-      }, 0);
-      console.log(
-        "****************************** [calcolaDurataTotale:" +
-          durataTotale +
-          "] ****************"
-      );
-      return durataTotale; // Restituisce la durata totale in minuti
     }
 
     function calcolaEndTime(startTime, durataTotale) {
-      console.log(
-        "****************************** [start calcolaEndTime] ******************************"
-      );
-      console.log(
-        "****************************** [calcolaEndTime - startTime:" +
-          startTime.format() +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [calcolaEndTime - durataTotale:" +
-          durataTotale +
-          "] ******************************"
-      );
-      // Crea un clone dell'oggetto moment per evitare di modificare l'originale
-      const endTime = moment
-        .tz(startTime, timezone)
-        .add(durataTotale, "minutes");
-
-      console.log(
-        "****************************** [calcolaEndTime - endTime:" +
-          endTime.format() +
-          "] ******************************"
-      );
-      return endTime;
+      return moment.tz(startTime, timezone).add(durataTotale, "minutes");
     }
 
     function verificaAnticipoMinimo(appointmentDate) {
-      console.log(
-        "****************************** [start verificaAnticipoMinimo] ******************************"
-      );
       const oraCorrente = moment.tz(timezone);
-
-      console.log(
-        "****************************** [start verificaAnticipoMinimo - oraCorrente:" +
-          oraCorrente.format() +
-          "] ******************************"
-      );
       const minutiDifferenza = appointmentDate.diff(oraCorrente, "minutes");
-      console.log(
-        "****************************** [start verificaAnticipoMinimo - minutiDifferenza:" +
-          minutiDifferenza +
-          "] ******************************"
-      );
       return minutiDifferenza >= minutiAnticipo;
     }
 
     async function findOccupiedSlots(date) {
-      console.log(
-        "****************************** [Start findOccupiedSlots] ******************************"
-      );
-      console.log(
-        "****************************** [findOccupiedSlots - date:" +
-          date.format() +
-          "] ******************************"
-      );
       let occupiedSlotsOverall = [];
 
       for (let periodKey in rangeOrari) {
@@ -232,47 +107,18 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           timezone
         );
 
-        try {
-          const request = {
-            resource: {
-              timeMin: startTime.toISOString(),
-              timeMax: endTime.toISOString(),
-              timeZone: timezone,
-              items: [{ id: calendarId }],
-            },
-          };
-
-          const response = await calendar.freebusy.query(request);
-          const occupiedSlots = response.data.calendars[calendarId].busy;
-          console.log(`Occupied Slots for ${periodKey}: `, occupiedSlots);
-
-          // Accumula gli slot occupati di tutti i range orari in un unico array
-          occupiedSlotsOverall = occupiedSlotsOverall.concat(occupiedSlots);
-        } catch (error) {
-          console.error(
-            `Error fetching occupied slots for ${periodKey}:`,
-            error
-          );
-          // Considera se vuoi gestire l'errore in modo diverso, ad esempio interrompendo il ciclo.
-        }
+        const occupiedSlots = await queryFreeBusy(
+          startTime.toISOString(),
+          endTime.toISOString()
+        );
+        // Accumula gli slot occupati di tutti i range orari in un unico array
+        occupiedSlotsOverall = occupiedSlotsOverall.concat(occupiedSlots);
       }
-
-      console.log(
-        "****************************** [findOccupiedSlots - occupiedSlotsOverall:" +
-          JSON.stringify(occupiedSlotsOverall, null, 2) +
-          "] ******************************"
-      );
 
       return occupiedSlotsOverall;
     }
 
     async function queryFreeBusy(startTime, endTime) {
-      console.log(
-        "****************************** [Query FreeBusy] ******************************"
-      );
-      console.log(`Start Time: (${startTime})`);
-      console.log(`End Time: (${endTime})`);
-
       try {
         const request = {
           resource: {
@@ -287,7 +133,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         return response.data.calendars[calendarId].busy;
       } catch (error) {
         console.error("Error fetching freebusy info:", error);
-        throw error; // Oppure gestisci l'errore come preferisci
       }
     }
 
@@ -298,14 +143,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       startTime,
       endTime
     ) {
-      console.log(
-        "****************************** [start createCalendarEvent] ******************************"
-      );
       try {
-        // Dettagli dell'evento di test
+        // Dettagli dell'evento
         const event = {
-          summary: `Prenotazione ${serviziBarbiere} per ${customer}, tel. ${customerPhoneNumber}`,
-          description: "Questo è un evento di test aggiunto da Dialogflow.",
+          summary: `${customer} - ${customerPhoneNumber} - ${serviziBarbiere}`,
+          description: `Prenotazione ${serviziBarbiere} per ${customer}, tel. ${customerPhoneNumber}`,
           start: {
             dateTime: startTime, // Assicurati che la data sia nel futuro
             timeZone: timezone, // Sostituisci con il tuo fuso orario
@@ -316,23 +158,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           },
         };
 
-        console.log(
-          "****************************** [createCalendarEvent - event:" +
-            event.summary +
-            "] ******************************"
-        );
-        console.log(
-          "****************************** [createCalendarEvent - start event:" +
-            event.start.dateTime +
-            "] ******************************"
-        );
-        console.log(
-          "****************************** [createCalendarEvent - end event:" +
-            event.end.dateTime +
-            "] ******************************"
-        );
-
-        // Tenta di aggiungere l'evento al calendario
+        // Aggiunge l'evento al calendario
         const res = await calendar.events.insert({
           auth: serviceAccountAuth,
           calendarId: calendarId,
@@ -356,20 +182,19 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     function handleWelcome() {
       const fulfillmentMessage = {
-        text: "Benvenuto, sono qui per assisterti con i tuoi appuntamenti. Cosa vuoi fare?",
+        text: "Benvenuto, sono qui per assisterti con i tuoi appuntamenti. Cosa vuoi fare fissare un nuovo appuntamento o modificarne uno esistente?",
         buttons: [
           {
-            label: "Nuovo App.",
-            callBackData: "NuovoAppuntamento",
+            label: "Nuovo",
+            callBackData: "Nuovo Appuntamento",
           },
           {
-            label: "Modifica App.",
-            callBackData: "ModificaAppuntamento",
+            label: "Modifica",
+            callBackData: "Modifica Appuntamento",
           },
         ],
       };
 
-      // Invia il payload come risposta al dialogflow
       agent.add(
         new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
           sendAsMessage: true,
@@ -378,25 +203,18 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
     }
 
-    // Funzione per gestire il fallback
     async function handleFallback() {
-      console.log(
-        "****************************** [start handleFallback] ******************************"
-      );
       const queryText = agent.query;
       const intentName = agent.intent;
 
       const values = [
-        new Date().toISOString(), // Timestamp come ID
+        new Date().toISOString(),
         intentName,
         queryText,
-        "Fallback triggered", // Questo potrebbe essere personalizzato o statico
+        "Fallback triggered",
       ];
 
       try {
-        console.log(
-          "****************************** [handleFallback start try] ******************************"
-        );
         await writeToSheet(values);
         agent.add(`Non sono sicuro di aver capito, puoi ripetere?`);
       } catch (error) {
@@ -424,9 +242,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       };
 
       try {
-        console.log(
-          "****************************** [writeToSheet start try] ******************************"
-        );
         const response = await sheets.spreadsheets.values.append(request);
         console.log(response.data);
       } catch (err) {
@@ -494,7 +309,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         ],
       };
 
-      // Invia il payload come risposta al dialogflow
       agent.add(
         new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
           sendAsMessage: true,
@@ -504,29 +318,13 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function getAvailableSlots() {
-      console.log(
-        "****************************** [Start getAvailableSlots] ******************************"
+      const context = agent.contexts.find((context) =>
+        context.name.includes("ongoing-appointment")
       );
-      const { servizibarbiere, date, timeBand } = agent.contexts.find(
-        (context) => context.name.includes("ongoing-appointment")
-      ).parameters;
-
-      console.log(
-        "****************************** [getAvailableSlots - servizibarbiere: ",
-        servizibarbiere,
-        "] ******************************"
-      );
+      const { servizibarbiere, date, timeBand } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
-      // Assicurati che servizibarbiere sia un array
       const durataTotale = calcolaDurataTotale(servizibarbiere);
-        /* Array.isArray(servizibarbiere) ? servizibarbiere : [servizibarbiere]
-      ); */
-      console.log(
-        "****************************** [getAvailableSlots - durataTotale: ",
-        durataTotale,
-        "] ******************************"
-      );
 
       const period = rangeOrari[timeBand];
       const start = moment.tz(
@@ -553,10 +351,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
       }
 
-      console.log(
-        "****************************** [Available Slots] ******************************",
-        availableSlots
-      );
       const fulfillmentMessage = {
         text: "Ecco gli orari disponibili, a che ora vuoi prenotare?",
         buttons: availableSlots.map((slot) => ({
@@ -582,45 +376,18 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function handleTimeSelection() {
-      console.log(
-        "****************************** [Start handleTimeSelection] ******************************"
+      const context = agent.contexts.find((context) =>
+        context.name.includes("ongoing-appointment")
       );
-
-      if (
-        !agent.contexts.find((context) =>
-          context.name.includes("ongoing-appointment")
-        )
-      ) {
-        console.error("Context 'ongoing-appointment' non disponibile.");
-        agent.add(
-          "Si è verificato un errore tecnico. Per favore, riprova più tardi."
-        );
-        return;
-      }
-
-      const { lastname, name, phoneNumber, servizibarbiere, date, timeBand } =
-        agent.contexts.find((context) =>
-          context.name.includes("ongoing-appointment")
-        ).parameters;
+      const { lastname, name, phoneNumber, servizibarbiere, date } = context.parameters;
       const time = agent.parameters.time;
       const customer = `${lastname} ${name}`;
-      console.log(
-        "****************************** [handleTimeSelection - Customer: " +
-          customer +
-          " - PhoneNumber:" +
-          phoneNumber +
-          " - Time: " +
-          time +
-          "] ******************************"
-      );
 
       const appointmentDate = replaceTimeInDate(
         moment.tz(date, timezone),
         moment.tz(time, timezone)
       );
       const durataTotale = calcolaDurataTotale(servizibarbiere);
-        /* Array.isArray(servizibarbiere) ? servizibarbiere : [servizibarbiere]
-      ); */
       const endTime = calcolaEndTime(appointmentDate, durataTotale);
 
       const busy = await queryFreeBusy(appointmentDate, endTime);

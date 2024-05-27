@@ -38,22 +38,19 @@ const calendarId = config.calendarId; // looks like "6ujc6j6rgfk02cp02vg6h38cs0@
 // ************************** Start Variabili attività ************************************
 // ****************************************************************************************
 
-// mostra un calendario a partire dalla data odierna più i giorni indicati nella variabile
+// tempo massimo dalla data corrente (ora) per effettuare la prenotazione
 const showPickerDays = 30;
 
 // tempo minimo dalla data corrente (ora) per effettuare la prenotazione
 const minutiAnticipo = 60; // 1 ora
-
-// tempo massimo dalla data corrente (ora) per effettuare la prenotazione
-const maxTime = 7; // in giorni
 
 // Definisci i giorni di chiusura (esempio: Domenica e Lunedì)
 const giorniDiChiusura = [0, 1];
 
 // Definisce i range orari
 const rangeOrari = {
-  mattina: { start: "09:00", end: "13:00" },
-  pomeriggio: { start: "15:00", end: "20:00" },
+  Mattina: { start: "09:00", end: "13:00" },
+  Pomeriggio: { start: "15:00", end: "20:00" },
   // Aggiungi altri range orari se necessario
 };
 
@@ -211,404 +208,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           "] ******************************"
       );
       return minutiDifferenza >= minutiAnticipo;
-    }
-
-    function verificaGiornoDiChiusura(appointmentDate) {
-      console.log(
-        "****************************** [start verificaGiornoDiChiusura] ******************************"
-      );
-      const giornoSettimana = appointmentDate.day();
-      console.log(
-        "****************************** [verificaGiornoDiChiusura - giornoSettimana:" +
-          giornoSettimana +
-          "] ******************************"
-      );
-      return giorniDiChiusura.includes(giornoSettimana);
-    }
-
-    function verificaRangeOrario(startTime, endTime) {
-      console.log(
-        "****************************** [start verificaRangeOrario] ******************************"
-      );
-      const startHour = moment(startTime).format("HH:mm");
-      const endHour = moment(endTime).format("HH:mm");
-      console.log(
-        "****************************** [verificaRangeOrario - startHour:" +
-          startHour +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [verificaRangeOrario - endHour:" +
-          endHour +
-          "] ******************************"
-      );
-
-      for (const range of Object.values(rangeOrari)) {
-        if (startHour >= range.start && endHour <= range.end) {
-          console.log(
-            "****************************** [verificaRangeOrario - inRange: true] ******************************"
-          );
-          return true;
-        }
-      }
-
-      return false;
-    }
-
-    function verificaDataPrenotazioneMax(appointmentDate) {
-      console.log(
-        "****************************** [start verificaDataPrenotazioneMax] ******************************"
-      );
-      const currentDate = moment.tz(timezone);
-      const maxDate = currentDate.clone().add(maxTime, "days");
-
-      console.log(
-        `Verifica che la data dell'appuntamento ${appointmentDate.format()} non superi il massimo di ${maxDate.format()}`
-      );
-
-      return (
-        appointmentDate.isBefore(maxDate) ||
-        appointmentDate.isSame(maxDate, "day")
-      );
-    }
-
-    async function addAppointment() {
-      console.log(
-        "****************************** [Start addAppointment] ******************************"
-      );
-
-      if (
-        !agent.contexts.find((context) =>
-          context.name.includes("ongoing-appointment")
-        )
-      ) {
-        console.error("Context 'ongoing-appointment' non disponibile.");
-        agent.add(
-          "Si è verificato un errore tecnico. Per favore, riprova più tardi."
-        );
-        return;
-      }
-
-      const { lastname, name, phoneNumber, servizibarbiere, date, time } =
-        agent.contexts.find((context) =>
-          context.name.includes("ongoing-appointment")
-        ).parameters;
-      const customer = `${lastname} ${name}`;
-      console.log(
-        "****************************** [addAppointment - Customer: " +
-          customer +
-          " - PhoneNumer:" +
-          phoneNumber +
-          "] ******************************"
-      );
-
-      const appointmentDate = replaceTimeInDate(
-        moment.tz(date, timezone),
-        moment.tz(time, timezone)
-      );
-      const durataTotale = calcolaDurataTotale(servizibarbiere);
-      const endTime = calcolaEndTime(appointmentDate, durataTotale);
-
-      // Prima di procedere con altri controlli, verifica che la data non superi il limite massimo
-      if (!verificaDataPrenotazioneMax(appointmentDate)) {
-        agent.add(
-          `La prenotazione non può essere effettuata oltre ${maxTime} giorni da oggi.`
-        );
-        return;
-      }
-
-      if (verificaGiornoDiChiusura(appointmentDate)) {
-        agent.add(
-          "Siamo spiacenti, il giorno scelto è un giorno di chiusura. Si prega di scegliere un altro giorno."
-        );
-        return;
-      }
-
-      if (!verificaRangeOrario(appointmentDate, endTime)) {
-        agent.add(
-          "L'orario scelto non rientra nei nostri orari di apertura. Si prega di scegliere un altro orario."
-        );
-        return;
-      }
-
-      if (!verificaAnticipoMinimo(appointmentDate)) {
-        agent.add(
-          `La prenotazione deve essere effettuata almeno ${minutiAnticipo} minuti in anticipo.`
-        );
-        return;
-      }
-
-      const result = await checkAvailability(
-        customer,
-        phoneNumber,
-        servizibarbiere,
-        appointmentDate,
-        endTime,
-        durataTotale
-      );
-      agent.add(result.message);
-    }
-
-    // Funzione per verificare la disponibilità
-    async function checkAvailability(
-      customer,
-      customerPhoneNumber,
-      serviziBarbiere,
-      startTime,
-      endTime,
-      durataTotale
-    ) {
-      console.log(
-        "****************************** [Start checkAvailability] ******************************"
-      );
-      try {
-        const busy = await queryFreeBusy(startTime, endTime);
-
-        if (busy.length === 0) {
-          console.log("Calendar is not busy, scheduling the event.");
-          return await createCalendarEvent(
-            customer,
-            customerPhoneNumber,
-            serviziBarbiere,
-            startTime,
-            endTime
-          );
-        } else {
-          console.log("Calendar is busy, searching for alternative slots.");
-          return await handleAlternativeSlotsResponse(startTime, durataTotale);
-        }
-      } catch (error) {
-        console.error(
-          "[CheckAvailability] - Error during availability check:",
-          error
-        );
-        return {
-          success: false,
-          message:
-            "Technical error encountered. Please try again later, or contact support if the issue persists.",
-        };
-      }
-    }
-
-    async function handleAlternativeSlotsResponse(startTime, durataTotale) {
-      console.log(
-        "****************************** [start handleAlternativeSlotsResponse] ******************************"
-      );
-      console.log(
-        "****************************** [handleAlternativeSlotsResponse - startTime:" +
-          startTime.format() +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [handleAlternativeSlotsResponse - durataTotale:" +
-          durataTotale +
-          "] ******************************"
-      );
-      const alternatives = await findAlternativeSlots(startTime, durataTotale);
-      let message = "";
-      let success = false;
-
-      if (alternatives.previous || alternatives.next) {
-        console.log(
-          "****************************** [handleAlternativeSlotsResponse alternatives:" +
-            JSON.stringify(alternatives, null, 2) +
-            "] ******************************"
-        );
-        message = "Orari alternativi disponibili:";
-        success = true; // Considera la presenza di slot alternativi come un successo
-
-        message += ` Prima: ${
-          alternatives.previous
-            ? moment.tz(alternatives.previous, timezone).format("HH:mm")
-            : "Orario non disponibile prima dell'orario richiesto."
-        }`;
-        message += ` Dopo: ${
-          alternatives.next
-            ? moment.tz(alternatives.next, timezone).format("HH:mm")
-            : "Orario non disponibile dopo dell'orario richiesto."
-        }`;
-      } else {
-        message =
-          "L'orario richiesto non è disponibile e non ci sono alternative disponibili.";
-      }
-
-      console.log(
-        "****************************** [handleAlternativeSlotsResponse complete message:" +
-          message +
-          "] ******************************"
-      );
-
-      return {
-        success: success,
-        message: message,
-      };
-    }
-
-    async function findAlternativeSlots(startTime, durataTotaleServizi) {
-      console.log(
-        "****************************** [Start findAlternativeSlots] ******************************"
-      );
-      console.log(
-        "****************************** [findAlternativeSlots - startTime:" +
-          startTime.format() +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [findAlternativeSlots - durataTotaleServizi:" +
-          durataTotaleServizi +
-          "] ******************************"
-      );
-
-      // Trova tutti gli slot occupati per il giorno specificato
-      const occupiedSlots = await findOccupiedSlots(startTime);
-
-      // Trova tutti gli slot liberi per il giorno specificato
-      const freeSlots = await findFreeSlots(
-        startTime,
-        durataTotaleServizi,
-        occupiedSlots
-      );
-
-      let previousSlot = null;
-      let nextSlot = null;
-      let smallestDiffPrev = Infinity;
-      let smallestDiffNext = Infinity;
-
-      freeSlots.forEach((slot) => {
-        const slotStart = moment.tz(slot.start, "Europe/Rome");
-        const slotEnd = moment.tz(slot.end, "Europe/Rome");
-        console.log(
-          "****************************** [findAlternativeSlots - freeSlots - slotStart:" +
-            slotStart.format() +
-            "] ******************************"
-        );
-        console.log(
-          "****************************** [findAlternativeSlots - freeSlots - slotEnd:" +
-            slotEnd.format() +
-            "] ******************************"
-        );
-
-        const diffPrev = startTime.diff(slotEnd, "minutes");
-        const diffNext = slotStart.diff(startTime, "minutes");
-
-        // Trova il "start" più vicino e antecedente all'orario dell'utente
-        if (diffPrev >= 0 && diffPrev < smallestDiffPrev) {
-          // Assicurati che lo slot termini prima di startTime e sia il più vicino possibile
-          smallestDiffPrev = diffPrev;
-          previousSlot = slotEnd
-            .subtract(durataTotaleServizi, "minutes")
-            .format();
-          console.log(
-            "****************************** [findAlternativeSlots - previousSlot:" +
-              previousSlot +
-              "] ******************************"
-          );
-        }
-
-        // Trova il "start" più vicino e successivo all'orario dell'utente
-        if (diffNext >= 0 && diffNext < smallestDiffNext) {
-          // Assicurati che lo slot inizi dopo startTime e sia il più vicino possibile
-          smallestDiffNext = diffNext;
-          nextSlot = slotStart.format();
-          console.log(
-            "****************************** [findAlternativeSlots - nextSlot:" +
-              nextSlot +
-              "] ******************************"
-          );
-        }
-      });
-
-      return { previous: previousSlot, next: nextSlot };
-    }
-
-    async function findFreeSlots(date, durataTotaleServizi, occupiedSlots) {
-      console.log(
-        "****************************** [Start findFreeSlots] ******************************"
-      );
-      console.log(
-        "****************************** [findFreeSlots - date:" +
-          date.format() +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [findFreeSlots - durataTotale:" +
-          durataTotaleServizi +
-          "] ******************************"
-      );
-      console.log(
-        "****************************** [findFreeSlots - occupiedSlots:" +
-          JSON.stringify(occupiedSlots, null, 2) +
-          "] ******************************"
-      );
-      let freeSlots = [];
-
-      // Genera slot di apertura come moment objects per il giorno specificato
-      Object.keys(rangeOrari).forEach((key) => {
-        const period = rangeOrari[key];
-        freeSlots.push({
-          start: moment.tz(
-            `${date.format("YYYY-MM-DD")}T${period.start}`,
-            timezone
-          ),
-          end: moment.tz(
-            `${date.format("YYYY-MM-DD")}T${period.end}`,
-            timezone
-          ),
-        });
-      });
-
-      // Ordina gli slot occupati per l'orario di inizio
-      const sortedOccupiedSlots = occupiedSlots
-        .map((slot) => ({
-          start: moment.tz(slot.start, timezone),
-          end: moment.tz(slot.end, timezone),
-        }))
-        .sort((a, b) => a.start.valueOf() - b.start.valueOf());
-
-      // Calcola gli slot liberi sottraendo gli slot occupati dagli slot di apertura
-      freeSlots = freeSlots.reduce((acc, slot) => {
-        let currentStart = slot.start;
-
-        sortedOccupiedSlots.forEach((occupied) => {
-          console.log(
-            "****************************** [findFreeSlots - sortedOccupiedSlots start:" +
-              occupied.start.format() +
-              " - end:" +
-              occupied.end.format() +
-              "] ******************************"
-          );
-          if (
-            occupied.start.isBefore(slot.end) &&
-            occupied.end.isAfter(currentStart)
-          ) {
-            if (occupied.start.isAfter(currentStart)) {
-              acc.push({ start: currentStart, end: occupied.start });
-            }
-            currentStart = occupied.end;
-          }
-        });
-
-        if (currentStart.isBefore(slot.end)) {
-          acc.push({ start: currentStart, end: slot.end });
-        }
-
-        return acc;
-      }, []);
-
-      // Filtra gli slot per tenere solo quelli con durata maggiore o uguale a durataTotaleServizi
-      const filteredFreeSlots = freeSlots.filter((slot) => {
-        console.log(
-          "****************************** [findFreeSlots - freeSlots start:" +
-            slot.start.format() +
-            " - end:" +
-            slot.end.format() +
-            "] ******************************"
-        );
-        return slot.end.diff(slot.start, "minutes") >= durataTotaleServizi;
-      });
-
-      // Mantieni gli slot in formato moment-timezone e restituisci
-      return filteredFreeSlots;
     }
 
     async function findOccupiedSlots(date) {
@@ -904,6 +503,165 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
     }
 
+    async function getAvailableSlots() {
+      console.log(
+        "****************************** [Start getAvailableSlots] ******************************"
+      );
+      const { servizibarbiere, date, timeBand } = agent.contexts.find(
+        (context) => context.name.includes("ongoing-appointment")
+      ).parameters;
+
+      console.log(
+        "****************************** [getAvailableSlots - servizibarbiere: ",
+        servizibarbiere,
+        "] ******************************"
+      );
+
+      const appointmentDate = moment.tz(date, timezone);
+      // Assicurati che servizibarbiere sia un array
+      const durataTotale = calcolaDurataTotale(servizibarbiere);
+        /* Array.isArray(servizibarbiere) ? servizibarbiere : [servizibarbiere]
+      ); */
+      console.log(
+        "****************************** [getAvailableSlots - durataTotale: ",
+        durataTotale,
+        "] ******************************"
+      );
+
+      const period = rangeOrari[timeBand];
+      const start = moment.tz(
+        appointmentDate.format("YYYY-MM-DD") + "T" + period.start,
+        timezone
+      );
+      const end = moment.tz(
+        appointmentDate.format("YYYY-MM-DD") + "T" + period.end,
+        timezone
+      );
+
+      const occupiedSlots = await findOccupiedSlots(appointmentDate);
+
+      const availableSlots = [];
+      let slotStart = start.clone();
+
+      while (slotStart.isBefore(end)) {
+        const slotEnd = slotStart.clone().add(durataTotale, "minutes");
+        if (slotEnd.isAfter(end)) break;
+
+        if (!isOverlapping(slotStart, slotEnd, occupiedSlots)) {
+          availableSlots.push(slotStart.format("HH:mm"));
+        }
+        slotStart.add(15, "minutes"); // Incremento di 15 minuti
+      }
+
+      console.log(
+        "****************************** [Available Slots] ******************************",
+        availableSlots
+      );
+      const fulfillmentMessage = {
+        text: "Ecco gli orari disponibili, a che ora vuoi prenotare?",
+        buttons: availableSlots.map((slot) => ({
+          label: slot,
+          callBackData: slot,
+        })),
+      };
+
+      agent.add(
+        new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
+          sendAsMessage: true,
+          rawPayload: true,
+        })
+      );
+    }
+
+    function isOverlapping(start, end, occupiedSlots) {
+      return occupiedSlots.some((slot) => {
+        const slotStart = moment.tz(slot.start, timezone);
+        const slotEnd = moment.tz(slot.end, timezone);
+        return start.isBefore(slotEnd) && end.isAfter(slotStart);
+      });
+    }
+
+    async function handleTimeSelection() {
+      console.log(
+        "****************************** [Start handleTimeSelection] ******************************"
+      );
+
+      if (
+        !agent.contexts.find((context) =>
+          context.name.includes("ongoing-appointment")
+        )
+      ) {
+        console.error("Context 'ongoing-appointment' non disponibile.");
+        agent.add(
+          "Si è verificato un errore tecnico. Per favore, riprova più tardi."
+        );
+        return;
+      }
+
+      const { lastname, name, phoneNumber, servizibarbiere, date, timeBand } =
+        agent.contexts.find((context) =>
+          context.name.includes("ongoing-appointment")
+        ).parameters;
+      const time = agent.parameters.time;
+      const customer = `${lastname} ${name}`;
+      console.log(
+        "****************************** [handleTimeSelection - Customer: " +
+          customer +
+          " - PhoneNumber:" +
+          phoneNumber +
+          " - Time: " +
+          time +
+          "] ******************************"
+      );
+
+      const appointmentDate = replaceTimeInDate(
+        moment.tz(date, timezone),
+        moment.tz(time, timezone)
+      );
+      const durataTotale = calcolaDurataTotale(servizibarbiere);
+        /* Array.isArray(servizibarbiere) ? servizibarbiere : [servizibarbiere]
+      ); */
+      const endTime = calcolaEndTime(appointmentDate, durataTotale);
+
+      const busy = await queryFreeBusy(appointmentDate, endTime);
+
+      if (busy.length === 0) {
+        console.log("Calendar is not busy, scheduling the event.");
+        const result = await createCalendarEvent(
+          customer,
+          phoneNumber,
+          servizibarbiere,
+          appointmentDate,
+          endTime
+        );
+        agent.add(result.message);
+      } else {
+        console.log("Calendar is busy, finding alternative slots.");
+        const availableSlots = await getAvailableSlots();
+
+        if (availableSlots.length === 0) {
+          agent.add(
+            "Non ci sono orari disponibili per la fascia oraria scelta. Si prega di scegliere un'altra fascia oraria."
+          );
+        } else {
+          const fulfillmentMessage = {
+            text: "Lo slot selezionato è occupato. Ecco gli altri orari disponibili, a che ora vuoi prenotare?",
+            buttons: availableSlots.map((slot) => ({
+              label: slot,
+              callBackData: slot,
+            })),
+          };
+
+          agent.add(
+            new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
+              sendAsMessage: true,
+              rawPayload: true,
+            })
+          );
+        }
+      }
+    }
+
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
     intentMap.set("Default Welcome Intent", handleWelcome);
@@ -913,11 +671,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       "appointment.day.add - context: ongoing-appointment",
       choseBandDay
     );
-    //intentMap.set("appointment.band-day.add - context: ongoing-appointment", choseBandDay)
-    /* intentMap.set(
-      "appointment.add - context: ongoing-appointment",
-      addAppointment
-    ); */
+    intentMap.set(
+      "appointment.band-day.add - context: ongoing-appointment",
+      getAvailableSlots
+    );
+    intentMap.set(
+      "appointment.time.select - context: ongoing-appointment",
+      handleTimeSelection
+    );
     intentMap.set("Default Fallback Intent", handleFallback);
     // intentMap.set('your intent name here', googleAssistantHandler);
     agent.handleRequest(intentMap);

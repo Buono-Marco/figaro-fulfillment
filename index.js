@@ -294,17 +294,47 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
     }
 
-    function choseBandDay() {
+    async function choseBandDay() {
+      const context = agent.contexts.find((context) =>
+        context.name.includes("ongoing-appointment")
+      );
+      const { date, servizibarbiere } = context.parameters;
+
+      const appointmentDate = moment.tz(date, timezone);
+      const durataTotale = calcolaDurataTotale(servizibarbiere);
+
+      const morningAvailableSlots = await checkAvailabilityForTimeBand(
+        appointmentDate,
+        "Mattina",
+        durataTotale
+      );
+      const morningAvailable = morningAvailableSlots.length > 0;
+
+      const afternoonAvailableSlots = await checkAvailabilityForTimeBand(
+        appointmentDate,
+        "Pomeriggio",
+        durataTotale
+      );
+      const afternoonAvailable = afternoonAvailableSlots.length > 0;
+
       const fulfillmentMessage = {
         text: "Quando vuoi prenotare?",
         buttons: [
           {
             label: "Mattina",
             callBackData: "Mattina",
+            disabled: !morningAvailable,
+            hover: morningAvailable
+              ? null
+              : "nessuna disponibilità in questa fascia oraria",
           },
           {
             label: "Pomeriggio",
             callBackData: "Pomeriggio",
+            disabled: !afternoonAvailable,
+            hover: afternoonAvailable
+              ? null
+              : "nessuna disponibilità in questa fascia oraria",
           },
         ],
       };
@@ -317,27 +347,18 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
     }
 
-    async function getAvailableSlots() {
-      const context = agent.contexts.find((context) =>
-        context.name.includes("ongoing-appointment")
-      );
-      const { servizibarbiere, date, timeBand } = context.parameters;
-
-      const appointmentDate = moment.tz(date, timezone);
-      const durataTotale = calcolaDurataTotale(servizibarbiere);
-
+    async function checkAvailabilityForTimeBand(date, timeBand, durataTotale) {
       const period = rangeOrari[timeBand];
       const start = moment.tz(
-        appointmentDate.format("YYYY-MM-DD") + "T" + period.start,
+        date.format("YYYY-MM-DD") + "T" + period.start,
         timezone
       );
       const end = moment.tz(
-        appointmentDate.format("YYYY-MM-DD") + "T" + period.end,
+        date.format("YYYY-MM-DD") + "T" + period.end,
         timezone
       );
 
-      const occupiedSlots = await findOccupiedSlots(appointmentDate);
-
+      const occupiedSlots = await findOccupiedSlots(date);
       const availableSlots = [];
       let slotStart = start.clone();
 
@@ -350,6 +371,24 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         }
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
       }
+
+      return availableSlots;
+    }
+
+    async function getAvailableSlots() {
+      const context = agent.contexts.find((context) =>
+        context.name.includes("ongoing-appointment")
+      );
+      const { servizibarbiere, date, timeBand } = context.parameters;
+
+      const appointmentDate = moment.tz(date, timezone);
+      const durataTotale = calcolaDurataTotale(servizibarbiere);
+
+      const availableSlots = checkAvailabilityForTimeBand(
+        appointmentDate,
+        timeBand,
+        durataTotale
+      );
 
       const fulfillmentMessage = {
         text: "Ecco gli orari disponibili, a che ora vuoi prenotare?",
@@ -379,7 +418,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       const context = agent.contexts.find((context) =>
         context.name.includes("ongoing-appointment")
       );
-      const { lastname, name, phoneNumber, servizibarbiere, date } = context.parameters;
+      const { lastname, name, phoneNumber, servizibarbiere, date } =
+        context.parameters;
       const time = agent.parameters.time;
       const customer = `${lastname} ${name}`;
 

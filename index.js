@@ -94,6 +94,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function findOccupiedSlots(date) {
+      console.log("findOccupiedSlots - start");
       let occupiedSlotsOverall = [];
 
       for (let periodKey in rangeOrari) {
@@ -114,6 +115,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         // Accumula gli slot occupati di tutti i range orari in un unico array
         occupiedSlotsOverall = occupiedSlotsOverall.concat(occupiedSlots);
       }
+      console.log("findOccupiedSlots - end");
 
       return occupiedSlotsOverall;
     }
@@ -168,7 +170,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         // Se l'evento viene aggiunto con successo, informa l'utente
         return {
           success: true,
-          message: `Appuntamento registrato con successo! ID Evento: ${res.data.id}`,
+          message: `Appuntamento registrato con successo! ID Evento: ${customerPhoneNumber}`, // res.data.id
         };
       } catch (error) {
         console.log(error);
@@ -295,9 +297,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function choseBandDay() {
-      const context = agent.contexts.find((context) =>
-        context.name.includes("ongoing-appointment")
-      );
+      const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
       const { date, servizibarbiere } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
@@ -317,27 +317,39 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
       const afternoonAvailable = afternoonAvailableSlots.length > 0;
 
-      const fulfillmentMessage = {
-        text: "Quando vuoi prenotare?",
-        buttons: [
-          {
-            label: "Mattina",
-            callBackData: "Mattina",
-            disabled: !morningAvailable,
-            hover: morningAvailable
-              ? null
-              : "nessuna disponibilità in questa fascia oraria",
+      let fulfillmentMessage = "";
+
+      if (!morningAvailable && !afternoonAvailable) {
+        fulfillmentMessage = {
+          text: "Non ci sono disponibilità per la data selezionata. Si prega di selezionare una nuova data.",
+          dataPicker: {
+            showDays: showPickerDays,
+            closingDays: giorniDiChiusura,
           },
-          {
-            label: "Pomeriggio",
-            callBackData: "Pomeriggio",
-            disabled: !afternoonAvailable,
-            hover: afternoonAvailable
-              ? null
-              : "nessuna disponibilità in questa fascia oraria",
-          },
-        ],
-      };
+        };
+      } else {
+        fulfillmentMessage = {
+          text: "Quando vuoi prenotare?",
+          buttons: [
+            {
+              label: "Mattina",
+              callBackData: "Mattina",
+              disabled: !morningAvailable,
+              hover: morningAvailable
+                ? null
+                : "nessuna disponibilità in questa fascia oraria",
+            },
+            {
+              label: "Pomeriggio",
+              callBackData: "Pomeriggio",
+              disabled: !afternoonAvailable,
+              hover: afternoonAvailable
+                ? null
+                : "nessuna disponibilità in questa fascia oraria",
+            },
+          ],
+        };
+      }
 
       agent.add(
         new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
@@ -348,7 +360,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function checkAvailabilityForTimeBand(date, timeBand, durataTotale) {
+      console.log("checkAvailabilityForTimeBand - start");
       const period = rangeOrari[timeBand];
+
       const start = moment.tz(
         date.format("YYYY-MM-DD") + "T" + period.start,
         timezone
@@ -371,20 +385,20 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         }
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
       }
+      console.log("checkAvailabilityForTimeBand - end");
 
       return availableSlots;
     }
 
     async function getAvailableSlots() {
-      const context = agent.contexts.find((context) =>
-        context.name.includes("ongoing-appointment")
-      );
+      console.log("getAvailableSlots - start");
+      const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
       const { servizibarbiere, date, timeBand } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
       const durataTotale = calcolaDurataTotale(servizibarbiere);
 
-      const availableSlots = checkAvailabilityForTimeBand(
+      const availableSlots = await checkAvailabilityForTimeBand(
         appointmentDate,
         timeBand,
         durataTotale
@@ -404,6 +418,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           rawPayload: true,
         })
       );
+      console.log("getAvailableSlots - end");
     }
 
     function isOverlapping(start, end, occupiedSlots) {
@@ -415,13 +430,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function handleTimeSelection() {
-      const context = agent.contexts.find((context) =>
-        context.name.includes("ongoing-appointment")
-      );
-      const { lastname, name, phoneNumber, servizibarbiere, date } =
+      const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
+      const { person, phoneNumber, servizibarbiere, date } =
         context.parameters;
       const time = agent.parameters.time;
-      const customer = `${lastname} ${name}`;
+      const customer = `${person.name}`;
 
       const appointmentDate = replaceTimeInDate(
         moment.tz(date, timezone),

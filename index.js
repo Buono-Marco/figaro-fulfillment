@@ -361,6 +361,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     async function checkAvailabilityForTimeBand(date, timeBand, durataTotale) {
       console.log("checkAvailabilityForTimeBand - start");
+      console.log("checkAvailabilityForTimeBand - date: " + date + " - timeBand: " + timeBand + " - durataTotale: " + durataTotale);
       const period = rangeOrari[timeBand];
 
       const start = moment.tz(
@@ -386,6 +387,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
       }
       console.log("checkAvailabilityForTimeBand - end");
+      console.log("checkAvailabilityForTimeBand - Available Slots (JSON):", JSON.stringify(availableSlots, null, 2));
+
 
       return availableSlots;
     }
@@ -408,7 +411,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         text: "Ecco gli orari disponibili, a che ora vuoi prenotare?",
         buttons: availableSlots.map((slot) => ({
           label: slot,
-          callBackData: slot,
+          callBackData: timeBand === "Mattina" ? `${slot} AM` : slot,
         })),
       };
 
@@ -431,7 +434,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     async function handleTimeSelection() {
       const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
-      const { person, phoneNumber, servizibarbiere, date } =
+      const { person, phoneNumber, servizibarbiere, date, timeBand } =
         context.parameters;
       const time = agent.parameters.time;
       const customer = `${person.name}`;
@@ -457,7 +460,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         agent.add(result.message);
       } else {
         console.log("Calendar is busy, finding alternative slots.");
-        const availableSlots = await getAvailableSlots();
+        const availableSlots = await checkAvailabilityForTimeBand(
+          appointmentDate,
+          timeBand,
+          durataTotale
+        );
 
         if (availableSlots.length === 0) {
           agent.add(
@@ -468,7 +475,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
             text: "Lo slot selezionato è occupato. Ecco gli altri orari disponibili, a che ora vuoi prenotare?",
             buttons: availableSlots.map((slot) => ({
               label: slot,
-              callBackData: slot,
+              callBackData: timeBand === "Mattina" ? `${slot} AM` : slot,
             })),
           };
 

@@ -297,7 +297,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function choseBandDay() {
-      const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-appointment"
+      );
       const { date, servizibarbiere } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
@@ -361,7 +363,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     async function checkAvailabilityForTimeBand(date, timeBand, durataTotale) {
       console.log("checkAvailabilityForTimeBand - start");
-      console.log("checkAvailabilityForTimeBand - date: " + date + " - timeBand: " + timeBand + " - durataTotale: " + durataTotale);
+      console.log(
+        "checkAvailabilityForTimeBand - date: " +
+          date +
+          " - timeBand: " +
+          timeBand +
+          " - durataTotale: " +
+          durataTotale
+      );
       const period = rangeOrari[timeBand];
 
       const start = moment.tz(
@@ -387,15 +396,19 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
       }
       console.log("checkAvailabilityForTimeBand - end");
-      console.log("checkAvailabilityForTimeBand - Available Slots (JSON):", JSON.stringify(availableSlots, null, 2));
-
+      console.log(
+        "checkAvailabilityForTimeBand - Available Slots (JSON):",
+        JSON.stringify(availableSlots, null, 2)
+      );
 
       return availableSlots;
     }
 
     async function getAvailableSlots() {
       console.log("getAvailableSlots - start");
-      const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-appointment"
+      );
       const { servizibarbiere, date, timeBand } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
@@ -433,7 +446,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function handleTimeSelection() {
-      const context = agent.contexts.find((context) => context.name === "ongoing-appointment");
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-appointment"
+      );
       const { person, phoneNumber, servizibarbiere, date, timeBand } =
         context.parameters;
       const time = agent.parameters.time;
@@ -489,8 +504,145 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
+    async function searchBooking() {
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-modify-appointment"
+      );
+      const bookingNumber = context.parameters.bookingNumber;
+      console.log("searchBooking: bookingNumber" + bookingNumber);
+      const plainPhoneNumber = bookingNumber.replace("#", "");
+      const now = moment.tz(timezone).format();
+
+      try {
+        let pageToken = null;
+        let matchedEvent = null;
+
+        do {
+          const response = await calendar.events.list({
+            calendarId: calendarId,
+            timeMin: now,
+            q: plainPhoneNumber,
+            singleEvents: true,
+            orderBy: "startTime",
+            maxResults: 10, // Limita il numero di eventi per richiesta
+            pageToken: pageToken,
+          });
+
+          const events = response.data.items;
+          pageToken = response.data.nextPageToken;
+
+          for (let event of events) {
+            if (event.summary.includes(plainPhoneNumber)) {
+              matchedEvent = event;
+              break;
+            }
+          }
+
+          if (matchedEvent) {
+            break;
+          }
+        } while (pageToken);
+
+        if (matchedEvent) {
+          const eventDateTime =
+            matchedEvent.start.dateTime || matchedEvent.start.date;
+          const formattedDate = moment(eventDateTime)
+            .tz(timezone)
+            .format("DD-MM-YYYY");
+          const formattedTime = moment(eventDateTime)
+            .tz(timezone)
+            .format("HH:mm");
+          const eventDetails = `${matchedEvent.summary} il ${formattedDate} alle ore ${formattedTime}`;
+
+          const fulfillmentMessage = {
+            text: `Ho trovato la tua prenotazione: ${eventDetails}. Vuoi confermare questa modifica?`,
+            buttons: [
+              {
+                label: "Modifica Servizi",
+                callBackData: "Modifica_Servizi",
+                disabled: false,
+              },
+              {
+                label: "Modifica Data",
+                callBackData: "Modifica_Data",
+                disabled: false,
+              },
+              {
+                label: "Modifica Ora",
+                callBackData: "Modifica_Ora",
+                disabled: false,
+              },
+              {
+                label: "Modifica Tutto",
+                callBackData: "Modifica_Tutto",
+                disabled: false,
+              },
+              {
+                label: "Cancella Appuntamento",
+                callBackData: "Cancella_Appuntamento",
+                disabled: false,
+              },
+              {
+                label: "Nuova Ricerca",
+                callBackData: "Nuova_Ricerca",
+                disabled: false,
+              },
+            ],
+          };
+
+          agent.add(
+            new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
+              sendAsMessage: true,
+              rawPayload: true,
+            })
+          );
+        } else {
+
+          const fulfillmentMessage = {
+            text: `Non ho trovato nessuna prenotazione con questo numero di telefono. Cosa vuoi fare?`,
+            buttons: [
+              {
+                label: "Nuova Ricerca",
+                callBackData: "Nuova_Ricerca",
+                disabled: false,
+              },
+              {
+                label: "Torna al menù principale",
+                callBackData: "main_menu",
+                disabled: false,
+              },
+            ],
+          };
+
+          agent.add(
+            new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
+              sendAsMessage: true,
+              rawPayload: true,
+            })
+          );
+        }
+      } catch (error) {
+        console.error("Error searching for event: ", error);
+        agent.add(
+          "Si è verificato un errore durante la ricerca della prenotazione. Per favore riprova più tardi."
+        );
+      }
+    }
+
+    function modifyBooking() {
+      
+    }
+
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
+    intentMap.set(
+      "modifica_appuntamento",
+      modifyBooking
+    );
+    intentMap.set(
+      "booking.number - context: ongoing-modify-appointment",
+      searchBooking
+    );
     intentMap.set("Default Welcome Intent", handleWelcome);
     intentMap.set("phone.add - context: ongoing-appointment", chooseServices);
     intentMap.set("service.add - context: ongoing-appointment", selectDate);

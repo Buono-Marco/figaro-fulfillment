@@ -107,6 +107,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           date.format("YYYY-MM-DD") + "T" + period.end,
           timezone
         );
+        console.log(
+          "findOccupiedSlots - startTime: " + startTime + " endTime: " + endTime
+        );
 
         const occupiedSlots = await queryFreeBusy(
           startTime.toISOString(),
@@ -170,7 +173,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         // Se l'evento viene aggiunto con successo, informa l'utente
         return {
           success: true,
-          message: `Appuntamento registrato con successo! ID Evento: ${customerPhoneNumber}`, // res.data.id
+          message: `Appuntamento registrato con successo! ID Evento: #${customerPhoneNumber}`,
         };
       } catch (error) {
         console.log(error);
@@ -298,12 +301,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     async function choseBandDay() {
       const context = agent.contexts.find(
-        (context) => context.name === "ongoing-appointment"
+        (context) =>
+          context.name === "ongoing-appointment" ||
+          context.name === "ongoing-modify-appointment"
       );
-      const { date, servizibarbiere } = context.parameters;
+      const { date, serviziBarbiere } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
-      const durataTotale = calcolaDurataTotale(servizibarbiere);
+      const durataTotale = calcolaDurataTotale(serviziBarbiere);
 
       const morningAvailableSlots = await checkAvailabilityForTimeBand(
         appointmentDate,
@@ -407,12 +412,28 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     async function getAvailableSlots() {
       console.log("getAvailableSlots - start");
       const context = agent.contexts.find(
-        (context) => context.name === "ongoing-appointment"
+        (context) =>
+          context.name === "ongoing-appointment" ||
+          context.name === "ongoing-modify-appointment"
       );
-      const { servizibarbiere, date, timeBand } = context.parameters;
+      const { serviziBarbiere, date, timeBand } = context.parameters;
+      console.log(
+        "getAvailableSlots - serviziBarbiere: " +
+          serviziBarbiere +
+          " date: " +
+          date +
+          " timeBand: " +
+          timeBand
+      );
 
       const appointmentDate = moment.tz(date, timezone);
-      const durataTotale = calcolaDurataTotale(servizibarbiere);
+      const durataTotale = calcolaDurataTotale(serviziBarbiere);
+      console.log(
+        "getAvailableSlots - appointmentDate: " +
+          appointmentDate +
+          " durataTotale" +
+          durataTotale
+      );
 
       const availableSlots = await checkAvailabilityForTimeBand(
         appointmentDate,
@@ -449,16 +470,15 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       const context = agent.contexts.find(
         (context) => context.name === "ongoing-appointment"
       );
-      const { person, phoneNumber, servizibarbiere, date, timeBand } =
+      const { customer, phoneNumber, serviziBarbiere, date, timeBand } =
         context.parameters;
       const time = agent.parameters.time;
-      const customer = `${person.name}`;
 
       const appointmentDate = replaceTimeInDate(
         moment.tz(date, timezone),
         moment.tz(time, timezone)
       );
-      const durataTotale = calcolaDurataTotale(servizibarbiere);
+      const durataTotale = calcolaDurataTotale(serviziBarbiere);
       const endTime = calcolaEndTime(appointmentDate, durataTotale);
 
       const busy = await queryFreeBusy(appointmentDate, endTime);
@@ -468,7 +488,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         const result = await createCalendarEvent(
           customer,
           phoneNumber,
-          servizibarbiere,
+          serviziBarbiere,
           appointmentDate,
           endTime
         );
@@ -510,7 +530,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
       const bookingNumber = context.parameters.bookingNumber;
       console.log("searchBooking: bookingNumber" + bookingNumber);
-      const plainPhoneNumber = bookingNumber.replace("#", "");
+      const phoneNumber = bookingNumber.replace("#", "");
       const now = moment.tz(timezone).format();
 
       try {
@@ -521,7 +541,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           const response = await calendar.events.list({
             calendarId: calendarId,
             timeMin: now,
-            q: plainPhoneNumber,
+            q: phoneNumber,
             singleEvents: true,
             orderBy: "startTime",
             maxResults: 10, // Limita il numero di eventi per richiesta
@@ -532,7 +552,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           pageToken = response.data.nextPageToken;
 
           for (let event of events) {
-            if (event.summary.includes(plainPhoneNumber)) {
+            if (event.summary.includes(phoneNumber)) {
               matchedEvent = event;
               break;
             }
@@ -553,38 +573,36 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
             .tz(timezone)
             .format("HH:mm");
           const eventDetails = `${matchedEvent.summary} il ${formattedDate} alle ore ${formattedTime}`;
+          const customer = extractCustomer(matchedEvent.summary);
+          const eventId = matchedEvent.id;
+
+          // Salva i dettagli dell'evento e l'ID nel contesto
+          agent.context.set({
+            name: "ongoing-modify-appointment",
+            lifespan: 5,
+            parameters: {
+              eventId: eventId,
+              phoneNumber: phoneNumber,
+              customer: customer,
+            },
+          });
 
           const fulfillmentMessage = {
             text: `Ho trovato la tua prenotazione: ${eventDetails}. Vuoi confermare questa modifica?`,
             buttons: [
               {
-                label: "Modifica Servizi",
-                callBackData: "Modifica_Servizi",
-                disabled: false,
-              },
-              {
-                label: "Modifica Data",
-                callBackData: "Modifica_Data",
-                disabled: false,
-              },
-              {
-                label: "Modifica Ora",
-                callBackData: "Modifica_Ora",
-                disabled: false,
-              },
-              {
-                label: "Modifica Tutto",
-                callBackData: "Modifica_Tutto",
+                label: "Modifica Prenotazione",
+                callBackData: "Modifica Prenotazione",
                 disabled: false,
               },
               {
                 label: "Cancella Appuntamento",
-                callBackData: "Cancella_Appuntamento",
+                callBackData: "Cancella Appuntamento",
                 disabled: false,
               },
               {
                 label: "Nuova Ricerca",
-                callBackData: "Nuova_Ricerca",
+                callBackData: "Nuova Ricerca Appuntamento",
                 disabled: false,
               },
             ],
@@ -597,18 +615,17 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
             })
           );
         } else {
-
           const fulfillmentMessage = {
             text: `Non ho trovato nessuna prenotazione con questo numero di telefono. Cosa vuoi fare?`,
             buttons: [
               {
                 label: "Nuova Ricerca",
-                callBackData: "Nuova_Ricerca",
+                callBackData: "Nuova Ricerca Appuntamento",
                 disabled: false,
               },
               {
                 label: "Torna al menù principale",
-                callBackData: "main_menu",
+                callBackData: "menù principale",
                 disabled: false,
               },
             ],
@@ -629,20 +646,107 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
-    function modifyBooking() {
-      
+    // Funzione per estrarre i servizi da eventDetails
+    function extractCustomer(eventDetails) {
+      const detailsParts = eventDetails.split(" - ");
+      const services = detailsParts.length > 0 ? detailsParts[0] : "";
+      return services.split(",");
+    }
+
+    async function modifyBooking() {
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-modify-appointment"
+      );
+      const eventId = context.parameters.eventId;
+      console.log("modifyBooking: eventId" + eventId);
+
+      const tipoModifica = context.parameters.tipoModifica;
+      console.log("modifyBooking: tipoModifica" + tipoModifica);
+
+      switch (tipoModifica) {
+        case "Modifica Prenotazione":
+          // Imposta il contesto per catturare l'input della nuova ora
+          agent.context.set({
+            name: "awaiting_services",
+            lifespan: 1,
+            parameters: {
+              eventId: eventId,
+            },
+          });
+          // Invita l'utente a selezionare una fascia oraria
+          chooseServices();
+          break;
+        case "Cancella Appuntamento":
+          // Logica per cancellare l'appuntamento
+          await cancelAppointment(eventId);
+          break;
+        default:
+          agent.add("Tipo di modifica non riconosciuto. Per favore riprova.");
+      }
+    }
+
+    async function modifyTime() {
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-modify-appointment"
+      );
+      const { eventId, customer, phoneNumber, serviziBarbiere, date, time } =
+        context.parameters;
+
+      try {
+        const eventResponse = await calendar.events.get({
+          calendarId: calendarId,
+          eventId: eventId,
+        });
+
+        const event = eventResponse.data;
+
+        const appointmentDate = replaceTimeInDate(
+          moment.tz(date, timezone),
+          moment.tz(time, timezone)
+        );
+        const durataTotale = calcolaDurataTotale(serviziBarbiere);
+        const endTime = calcolaEndTime(appointmentDate, durataTotale);
+
+        event.start = {
+          dateTime: appointmentDate.toISOString(),
+          timeZone: timezone,
+        };
+        event.end = {
+          dateTime: endTime.toISOString(),
+          timeZone: timezone,
+        };
+
+        event.summary = `${customer} - ${phoneNumber} - ${serviziBarbiere}`;
+        event.description = `Prenotazione ${serviziBarbiere} per ${customer}, tel. ${phoneNumber}`;
+
+        await calendar.events.update({
+          auth: serviceAccountAuth,
+          calendarId: calendarId,
+          eventId: eventId,
+          requestBody: event,
+        });
+
+        agent.add(`L'appuntamento è stato modificata con successo!`);
+      } catch (error) {
+        console.error("Error modifying event: ", error);
+        agent.add(
+          "Si è verificato un errore durante l'aggiornamento dell'appuntamento. Per favore riprova più tardi."
+        );
+      }
     }
 
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
     intentMap.set(
-      "modifica_appuntamento",
-      modifyBooking
-    );
-    intentMap.set(
       "booking.number - context: ongoing-modify-appointment",
       searchBooking
     );
+    intentMap.set("modifica_appuntamento", modifyBooking);
+    intentMap.set("awaiting_services", selectDate);
+    intentMap.set("awaiting_date", choseBandDay);
+    intentMap.set("awaiting_time_band", getAvailableSlots);
+    intentMap.set("awaiting_time", modifyTime);
+
     intentMap.set("Default Welcome Intent", handleWelcome);
     intentMap.set("phone.add - context: ongoing-appointment", chooseServices);
     intentMap.set("service.add - context: ongoing-appointment", selectDate);

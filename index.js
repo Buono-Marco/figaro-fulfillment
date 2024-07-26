@@ -646,11 +646,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
-    // Funzione per estrarre i servizi da eventDetails
+    // Funzione per estrarre il customer da eventDetails
     function extractCustomer(eventDetails) {
       const detailsParts = eventDetails.split(" - ");
-      const services = detailsParts.length > 0 ? detailsParts[0] : "";
-      return services.split(",");
+      const customer = detailsParts.length > 0 ? detailsParts[0] : "";
+      return customer;
     }
 
     async function modifyBooking() {
@@ -658,14 +658,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         (context) => context.name === "ongoing-modify-appointment"
       );
       const eventId = context.parameters.eventId;
-      console.log("modifyBooking: eventId" + eventId);
+      console.log("modifyBooking: eventId " + eventId);
 
       const tipoModifica = context.parameters.tipoModifica;
-      console.log("modifyBooking: tipoModifica" + tipoModifica);
+      console.log("modifyBooking: tipoModifica " + tipoModifica);
 
       switch (tipoModifica) {
         case "Modifica Prenotazione":
-          // Imposta il contesto per catturare l'input della nuova ora
+          // Imposta il contesto per catturare l'input delle modifiche
           agent.context.set({
             name: "awaiting_services",
             lifespan: 1,
@@ -673,15 +673,36 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
               eventId: eventId,
             },
           });
-          // Invita l'utente a selezionare una fascia oraria
+          // Invita l'utente a selezionare il servizio
           chooseServices();
           break;
         case "Cancella Appuntamento":
-          // Logica per cancellare l'appuntamento
-          await cancelAppointment(eventId);
+          await deleteAppointment(eventId);
           break;
         default:
           agent.add("Tipo di modifica non riconosciuto. Per favore riprova.");
+      }
+    }
+
+    async function deleteAppointment() {
+      const context = agent.contexts.find(
+        (context) => context.name === "ongoing-modify-appointment"
+      );
+      const eventId = context.parameters.eventId;
+
+      try {
+        await calendar.events.delete({
+          auth: serviceAccountAuth,
+          calendarId: calendarId,
+          eventId: eventId,
+        });
+
+        agent.add("L'appuntamento è stato cancellato con successo.");
+      } catch (error) {
+        console.error("Error canceling event: ", error);
+        agent.add(
+          "Si è verificato un errore durante la cancellazione dell'appuntamento. Per favore riprova più tardi."
+        );
       }
     }
 

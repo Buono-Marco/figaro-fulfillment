@@ -747,7 +747,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           requestBody: event,
         });
 
-        agent.add(`L'appuntamento è stato modificata con successo!`);
+        agent.add(`L'appuntamento è stato modificato con successo!`);
       } catch (error) {
         console.error("Error modifying event: ", error);
         agent.add(
@@ -756,8 +756,28 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
+    /* function resetChat() {
+      console.log("resetChat - Start");
+      // Prende tutti i contesti presenti
+      const contexts = agent.contexts;
+
+      // Elimina tutti i contesti attuali
+      contexts.forEach((context) => {
+        agent.context.delete(context.name);
+      });
+
+      // Forza l'uscita da eventuali intent di follow-up
+      agent.context.set({
+        name: "awaiting_root_intent",
+        lifespan: 1,
+      });
+
+      handleWelcome();
+    } */
+
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
+    // Gestione modifica appuntamento
     intentMap.set(
       "booking.number - context: ongoing-modify-appointment",
       searchBooking
@@ -768,6 +788,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     intentMap.set("awaiting_time_band", getAvailableSlots);
     intentMap.set("awaiting_time", modifyTime);
 
+    // Gestione creazione appuntamento
     intentMap.set("Default Welcome Intent", handleWelcome);
     intentMap.set("phone.add - context: ongoing-appointment", chooseServices);
     intentMap.set("service.add - context: ongoing-appointment", selectDate);
@@ -783,6 +804,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       "appointment.time.select - context: ongoing-appointment",
       handleTimeSelection
     );
+
+    // Intent generici
+    //intentMap.set("reset_chat", resetChat);
     intentMap.set("Default Fallback Intent", handleFallback);
     // intentMap.set('your intent name here', googleAssistantHandler);
     agent.handleRequest(intentMap);

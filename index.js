@@ -41,7 +41,7 @@ const spreadsheetId = config.spreadsheetId; // looks like "3CCzbMLS990lKVetxD--5
 // tempo massimo dalla data corrente (ora) per effettuare la prenotazione
 const showPickerDays = 30;
 // tempo minimo dalla data corrente (ora) per effettuare la prenotazione
-const minutiAnticipo = 60; // 1 ora
+const minutiAnticipo = 30; // 1 ora
 // Definisci i giorni di chiusura (esempio: Domenica e Lunedì)
 const giorniDiChiusura = [0, 1];
 // Definisce i range orari
@@ -66,6 +66,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     const agent = new WebhookClient({ request, response });
 
     function replaceTimeInDate(date, time) {
+      console.log("replaceTimeInDate: " + date + " - " + time);
       // Applica l'ora, i minuti e i secondi da `time` a `date`
       date.hour(time.hour());
       date.minute(time.minute());
@@ -85,12 +86,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     function calcolaEndTime(startTime, durataTotale) {
       return moment.tz(startTime, timezone).add(durataTotale, "minutes");
-    }
-
-    function verificaAnticipoMinimo(appointmentDate) {
-      const oraCorrente = moment.tz(timezone);
-      const minutiDifferenza = appointmentDate.diff(oraCorrente, "minutes");
-      return minutiDifferenza >= minutiAnticipo;
     }
 
     async function findOccupiedSlots(date) {
@@ -179,15 +174,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         console.log(error);
         return {
           success: false,
-          message:
-            "Si è verificato un errore durante l'aggiunta dell'appuntamento. Per favore, riprova più tardi.",
+          message: "Si è verificato un errore durante l'aggiunta dell'appuntamento. Per favore, riprova più tardi.",
         };
       }
     }
 
     function handleWelcome() {
       const fulfillmentMessage = {
-        text: "Benvenuto, sono qui per assisterti con i tuoi appuntamenti. Cosa vuoi fare fissare un nuovo appuntamento o modificarne uno esistente?",
+        text: "Benvenuto! Sono Figaro il tuo assistente per gli appuntamenti. Cosa vuoi fare oggi, fissare un nuovo appuntamento o modificarne uno esistente?",
         buttons: [
           {
             label: "Nuovo",
@@ -206,6 +200,16 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           rawPayload: true,
         })
       );
+    }
+
+    function handleReset() {
+      console.log("handleReset - start");
+
+      agent.contexts.forEach((context) => {
+        agent.context.delete(context.name);
+      });
+
+      handleWelcome();
     }
 
     async function handleFallback() {
@@ -378,14 +382,16 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
       const period = rangeOrari[timeBand];
 
-      const start = moment.tz(
-        date.format("YYYY-MM-DD") + "T" + period.start,
-        timezone
-      );
+      const start = getEffectiveStartTime(date, period, timezone);
       const end = moment.tz(
         date.format("YYYY-MM-DD") + "T" + period.end,
         timezone
       );
+
+      if (!start) {
+        console.log("checkAvailabilityForTimeBand - No available slots.");
+        return []; // Nessuno slot disponibile, restituisce un array vuoto
+      }
 
       const occupiedSlots = await findOccupiedSlots(date);
       const availableSlots = [];
@@ -407,6 +413,35 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
 
       return availableSlots;
+    }
+
+    function getEffectiveStartTime(date, period, timezone) {
+      const start = moment.tz(date.format("YYYY-MM-DD") + "T" + period.start, timezone);
+      const end = moment.tz(date.format("YYYY-MM-DD") + "T" + period.end, timezone);
+      const currentDateTime = moment.tz(timezone);
+
+      if (date.isSame(currentDateTime, 'day')) {
+        let currentMoment = currentDateTime.add(minutiAnticipo, 'minutes');
+        
+        // Se il momento attuale (più il buffer) è prima dell'inizio del periodo, impostalo all'inizio del periodo
+        if (currentMoment.isBefore(start)) {
+          currentMoment = start.clone();
+        } else if (currentMoment.isAfter(end)) {
+          // Se il momento attuale (più il buffer) è dopo la fine del periodo, non ci sono slot disponibili
+          return null;
+        } else {
+          // Allinea l'orario al prossimo slot disponibile in base agli incrementi di 15 minuti
+          const minutesPastStart = currentMoment.diff(start, 'minutes');
+          const remainder = minutesPastStart % 15;
+          if (remainder !== 0) {
+            currentMoment.add(15 - remainder, 'minutes');
+          }
+        }
+    
+        return currentMoment;
+      }
+      
+      return start; // Ritorna l'ora di inizio del periodo se la data non è oggi o l'ora attuale è prima dell'inizio
     }
 
     async function getAvailableSlots() {
@@ -679,6 +714,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         case "Cancella Appuntamento":
           await deleteAppointment(eventId);
           break;
+        case "reset chat":
+          handleReset();
+          break;
         default:
           agent.add("Tipo di modifica non riconosciuto. Per favore riprova.");
       }
@@ -698,6 +736,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         });
 
         agent.add("L'appuntamento è stato cancellato con successo.");
+        handleReset();
       } catch (error) {
         console.error("Error canceling event: ", error);
         agent.add(
@@ -748,6 +787,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         });
 
         agent.add(`L'appuntamento è stato modificato con successo!`);
+        handleReset();
       } catch (error) {
         console.error("Error modifying event: ", error);
         agent.add(
@@ -756,25 +796,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
-    /* function resetChat() {
-      console.log("resetChat - Start");
-      // Prende tutti i contesti presenti
-      const contexts = agent.contexts;
-
-      // Elimina tutti i contesti attuali
-      contexts.forEach((context) => {
-        agent.context.delete(context.name);
-      });
-
-      // Forza l'uscita da eventuali intent di follow-up
-      agent.context.set({
-        name: "awaiting_root_intent",
-        lifespan: 1,
-      });
-
-      handleWelcome();
-    } */
-
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
     // Gestione modifica appuntamento
@@ -782,7 +803,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       "booking.number - context: ongoing-modify-appointment",
       searchBooking
     );
-    intentMap.set("modifica_appuntamento", modifyBooking);
+    intentMap.set(
+      "modifica_appuntamento - context: ongoing-modify-appointment",
+      modifyBooking
+    );
+    intentMap.set("reset - ongoing-modify-appointment", handleReset);
     intentMap.set("awaiting_services", selectDate);
     intentMap.set("awaiting_date", choseBandDay);
     intentMap.set("awaiting_time_band", getAvailableSlots);
@@ -790,6 +815,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     // Gestione creazione appuntamento
     intentMap.set("Default Welcome Intent", handleWelcome);
+    intentMap.set("reset - ongoing-appointment", handleReset);
     intentMap.set("phone.add - context: ongoing-appointment", chooseServices);
     intentMap.set("service.add - context: ongoing-appointment", selectDate);
     intentMap.set(
@@ -806,7 +832,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     );
 
     // Intent generici
-    //intentMap.set("reset_chat", resetChat);
     intentMap.set("Default Fallback Intent", handleFallback);
     // intentMap.set('your intent name here', googleAssistantHandler);
     agent.handleRequest(intentMap);

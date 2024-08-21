@@ -67,6 +67,13 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     function replaceTimeInDate(date, time) {
       console.log("replaceTimeInDate: " + date + " - " + time);
+
+      // Se l'ora è 12 AM (mezzanotte), controlla il contesto e correggi
+      if (time.hour() === 0 && date.hour() === 12) {
+        // Se viene interpretata come mezzanotte, correggi a mezzogiorno
+        time.hour(12);
+      }
+
       // Applica l'ora, i minuti e i secondi da `time` a `date`
       date.hour(time.hour());
       date.minute(time.minute());
@@ -174,7 +181,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         console.log(error);
         return {
           success: false,
-          message: "Si è verificato un errore durante l'aggiunta dell'appuntamento. Per favore, riprova più tardi.",
+          message:
+            "Si è verificato un errore durante l'aggiunta dell'appuntamento. Per favore, riprova più tardi.",
         };
       }
     }
@@ -416,13 +424,19 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     function getEffectiveStartTime(date, period, timezone) {
-      const start = moment.tz(date.format("YYYY-MM-DD") + "T" + period.start, timezone);
-      const end = moment.tz(date.format("YYYY-MM-DD") + "T" + period.end, timezone);
+      const start = moment.tz(
+        date.format("YYYY-MM-DD") + "T" + period.start,
+        timezone
+      );
+      const end = moment.tz(
+        date.format("YYYY-MM-DD") + "T" + period.end,
+        timezone
+      );
       const currentDateTime = moment.tz(timezone);
 
-      if (date.isSame(currentDateTime, 'day')) {
-        let currentMoment = currentDateTime.add(minutiAnticipo, 'minutes');
-        
+      if (date.isSame(currentDateTime, "day")) {
+        let currentMoment = currentDateTime.add(minutiAnticipo, "minutes");
+
         // Se il momento attuale (più il buffer) è prima dell'inizio del periodo, impostalo all'inizio del periodo
         if (currentMoment.isBefore(start)) {
           currentMoment = start.clone();
@@ -431,16 +445,16 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           return null;
         } else {
           // Allinea l'orario al prossimo slot disponibile in base agli incrementi di 15 minuti
-          const minutesPastStart = currentMoment.diff(start, 'minutes');
+          const minutesPastStart = currentMoment.diff(start, "minutes");
           const remainder = minutesPastStart % 15;
           if (remainder !== 0) {
-            currentMoment.add(15 - remainder, 'minutes');
+            currentMoment.add(15 - remainder, "minutes");
           }
         }
-    
+
         return currentMoment;
       }
-      
+
       return start; // Ritorna l'ora di inizio del periodo se la data non è oggi o l'ora attuale è prima dell'inizio
     }
 

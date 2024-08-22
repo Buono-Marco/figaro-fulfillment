@@ -733,7 +733,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         case "Modifica Prenotazione":
           // Imposta il contesto per catturare l'input delle modifiche
           agent.context.set({
-            name: "awaiting_services",
+            name: "004_service_modify_appointment",
             lifespan: 1,
             parameters: {
               eventId: eventId,
@@ -829,41 +829,29 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
-    // Gestione modifica appuntamento
-    intentMap.set(
-      "booking.number - context: ongoing-modify-appointment",
-      searchBooking
-    );
-    intentMap.set(
-      "modifica_appuntamento - context: ongoing-modify-appointment",
-      modifyBooking
-    );
-    intentMap.set("reset - ongoing-modify-appointment", handleReset);
-    intentMap.set("awaiting_services", selectDate);
-    intentMap.set("awaiting_date", choseBandDay);
-    intentMap.set("awaiting_time_band", getAvailableSlots);
-    intentMap.set("awaiting_time", modifyTime);
 
     // Gestione creazione appuntamento
     intentMap.set("Default Welcome Intent", handleWelcome);
-    intentMap.set("reset - ongoing-appointment", handleReset);
-    intentMap.set("phone.add - context: ongoing-appointment", chooseServices);
-    intentMap.set("service.add - context: ongoing-appointment", selectDate);
-    intentMap.set(
-      "appointment.day.add - context: ongoing-appointment",
-      choseBandDay
-    );
-    intentMap.set(
-      "appointment.band-day.add - context: ongoing-appointment",
-      getAvailableSlots
-    );
-    intentMap.set(
-      "appointment.time.select - context: ongoing-appointment",
-      handleTimeSelection
-    );
+    intentMap.set("03_add_phone_new_appointment", chooseServices);
+    intentMap.set("04_add_service_new_appointment", selectDate);
+    intentMap.set("05_add_day_new_appointment", choseBandDay);
+    intentMap.set("06_add_band_day_new_appointment", getAvailableSlots);
+    intentMap.set("07_add_time_new_appointment", handleTimeSelection);
+    intentMap.set("08_reset_new_appointment", handleReset);
+
+    
+    // Gestione modifica appuntamento
+    intentMap.set("002_book_number_modify_appointment", searchBooking);
+    intentMap.set("003_choose_modify_appointment", modifyBooking);
+    intentMap.set("004_service_modify_appointment", selectDate);
+    intentMap.set("005_date_modify_appointment", choseBandDay);
+    intentMap.set("006_time_band_modify_appointment", getAvailableSlots);
+    intentMap.set("007_time_modify_appointment", modifyTime);
+    intentMap.set("008_reset_modify_appointment", handleReset);
 
     // Intent generici
     intentMap.set("Default Fallback Intent", handleFallback);
+    intentMap.set("Default Reset", handleReset);
     // intentMap.set('your intent name here', googleAssistantHandler);
     agent.handleRequest(intentMap);
   }

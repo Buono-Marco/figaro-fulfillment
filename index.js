@@ -41,7 +41,7 @@ const spreadsheetId = config.spreadsheetId; // looks like "3CCzbMLS990lKVetxD--5
 // tempo massimo dalla data corrente (ora) per effettuare la prenotazione
 const showPickerDays = 30;
 // tempo minimo dalla data corrente (ora) per effettuare la prenotazione
-const minutiAnticipo = 30; // 1 ora
+const minutiAnticipo = 15; // 15 minuti
 // Definisci i giorni di chiusura (esempio: Domenica e Lunedì)
 const giorniDiChiusura = [0, 1];
 // Definisce i range orari
@@ -379,7 +379,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function checkAvailabilityForTimeBand(date, timeBand, durataTotale) {
-      console.log("checkAvailabilityForTimeBand - start");
       console.log(
         "checkAvailabilityForTimeBand - date: " +
           date +
@@ -390,7 +389,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
       const period = rangeOrari[timeBand];
 
-      const start = getEffectiveStartTime(date, period, timezone);
+      const start = getEffectiveStartTime(date, period);
       const end = moment.tz(
         date.format("YYYY-MM-DD") + "T" + period.end,
         timezone
@@ -401,15 +400,30 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         return []; // Nessuno slot disponibile, restituisce un array vuoto
       }
 
+      console.log(
+        "checkAvailabilityForTimeBand - start: " + start + " - end: " + end
+      );
+
       const occupiedSlots = await findOccupiedSlots(date);
       const availableSlots = [];
       let slotStart = start.clone();
 
-      while (slotStart.isBefore(end)) {
+      while (slotStart.isBefore(end) || slotStart.isSame(end, "minute")) {
         const slotEnd = slotStart.clone().add(durataTotale, "minutes");
-        if (slotEnd.isAfter(end)) break;
+        console.log(
+          `checkAvailabilityForTimeBand - slotStart=${slotStart.format()} - end=${slotEnd.format()}`
+        );
+
+        // Modifica qui: controlliamo se slotEnd supera 'end' meno una piccola tolleranza
+        if (slotEnd.isAfter(end) && !slotEnd.isSame(end, "minute")) {
+          console.log(
+            "checkAvailabilityForTimeBand - breaking loop, slotEnd is after end"
+          );
+          break;
+        }
 
         if (!isOverlapping(slotStart, slotEnd, occupiedSlots)) {
+          console.log("checkAvailabilityForTimeBand - !isOverlapping");
           availableSlots.push(slotStart.format("HH:mm"));
         }
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
@@ -423,7 +437,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       return availableSlots;
     }
 
-    function getEffectiveStartTime(date, period, timezone) {
+    function getEffectiveStartTime(date, period) {
       const start = moment.tz(
         date.format("YYYY-MM-DD") + "T" + period.start,
         timezone
@@ -511,6 +525,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       return occupiedSlots.some((slot) => {
         const slotStart = moment.tz(slot.start, timezone);
         const slotEnd = moment.tz(slot.end, timezone);
+        console.log(
+          `Checking overlap: start=${start.format()}, end=${end.format()}, slotStart=${slotStart.format()}, slotEnd=${slotEnd.format()}`
+        );
         return start.isBefore(slotEnd) && end.isAfter(slotStart);
       });
     }

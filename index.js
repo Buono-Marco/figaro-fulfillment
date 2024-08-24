@@ -126,6 +126,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function queryFreeBusy(startTime, endTime) {
+      console.log("queryFreeBusy - start");
       try {
         const request = {
           resource: {
@@ -301,6 +302,12 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           showDays: showPickerDays,
           closingDays: giorniDiChiusura,
         },
+        buttons: [
+          {
+            label: "Indietro",
+            callBackData: "Torna ai servizi",
+          },
+        ],
       };
 
       agent.add(
@@ -312,11 +319,13 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     async function choseBandDay() {
+      console.log("choseBandDay - start");
       const context = agent.contexts.find(
         (context) =>
           context.name === "ongoing-appointment" ||
           context.name === "ongoing-modify-appointment"
       );
+      
       const { date, serviziBarbiere } = context.parameters;
 
       const appointmentDate = moment.tz(date, timezone);
@@ -366,6 +375,10 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
                 ? null
                 : "nessuna disponibilità in questa fascia oraria",
             },
+            {
+              label: "Indietro",
+              callBackData: "Torna alla data",
+            },
           ],
         };
       }
@@ -410,29 +423,19 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
       while (slotStart.isBefore(end) || slotStart.isSame(end, "minute")) {
         const slotEnd = slotStart.clone().add(durataTotale, "minutes");
-        console.log(
-          `checkAvailabilityForTimeBand - slotStart=${slotStart.format()} - end=${slotEnd.format()}`
-        );
 
-        // Modifica qui: controlliamo se slotEnd supera 'end' meno una piccola tolleranza
-        if (slotEnd.isAfter(end) && !slotEnd.isSame(end, "minute")) {
-          console.log(
-            "checkAvailabilityForTimeBand - breaking loop, slotEnd is after end"
-          );
-          break;
-        }
+        if (slotEnd.isAfter(end) && !slotEnd.isSame(end, "minute")) { break; }
 
         if (!isOverlapping(slotStart, slotEnd, occupiedSlots)) {
-          console.log("checkAvailabilityForTimeBand - !isOverlapping");
           availableSlots.push(slotStart.format("HH:mm"));
         }
         slotStart.add(15, "minutes"); // Incremento di 15 minuti
       }
       console.log("checkAvailabilityForTimeBand - end");
-      console.log(
-        "checkAvailabilityForTimeBand - Available Slots (JSON):",
-        JSON.stringify(availableSlots, null, 2)
-      );
+      // console.log(
+      //   "checkAvailabilityForTimeBand - Available Slots (JSON):",
+      //   JSON.stringify(availableSlots, null, 2)
+      // );
 
       return availableSlots;
     }
@@ -506,10 +509,16 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
       const fulfillmentMessage = {
         text: "Ecco gli orari disponibili, a che ora vuoi prenotare?",
-        buttons: availableSlots.map((slot) => ({
-          label: slot,
-          callBackData: timeBand === "Mattina" ? `${slot} AM` : slot,
-        })),
+        buttons: [
+          ...availableSlots.map((slot) => ({
+            label: slot,
+            callBackData: timeBand === "Mattina" ? `${slot} AM` : slot,
+          })),
+          {
+            label: "Indietro",
+            callBackData: "Torna alla timeband",
+          },
+        ],
       };
 
       agent.add(
@@ -827,6 +836,54 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
+    async function handlePrevious() {
+      console.log("handlePrevious - start");
+      const queryText = agent.query;
+      console.log(`handlePrevious - queryText: ${queryText}`);
+
+      switch (queryText) {
+        case "Torna ai servizi":
+          console.log("handlePrevious - servizi");
+          agent.context.set({
+            name: "04_add_service_new_appointment-followup",
+            lifespan: 1,
+            parameters: {
+              action: "04_add_service_new_appointment.04_add_service_new_appointment-previous",
+            },
+          });
+          chooseServices();
+          break;
+        case "Torna alla data":
+          console.log("handlePrevious - data");
+          agent.context.set({
+            name: "05_add_day_new_appointment-followup",
+            lifespan: 1,
+            parameters: {
+              action: "05_add_day_new_appointment.05_add_day_new_appointment-previous",
+            },
+          });
+          selectDate();
+          break;
+        case "Torna alla timeband":
+          console.log("handlePrevious - timeband");
+          agent.context.set({
+            name: "06_add_band_day_new_appointment-followup",
+            lifespan: 1,
+            parameters: {
+              action: "06_add_band_day_new_appointment.06_add_band_day_new_appointment-previous",
+            },
+          });
+          await choseBandDay();
+          break;
+        default:
+          agent.add(
+            "Si è verificato un errore durante la ricerca della prenotazione. Per favore riprova più tardi."
+          );
+      }     
+
+      console.log("handlePrevious - end");
+    }
+
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
 
@@ -834,12 +891,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     intentMap.set("Default Welcome Intent", handleWelcome);
     intentMap.set("03_add_phone_new_appointment", chooseServices);
     intentMap.set("04_add_service_new_appointment", selectDate);
+    intentMap.set("04_add_service_new_appointment - previous", handlePrevious); // chooseServices
     intentMap.set("05_add_day_new_appointment", choseBandDay);
+    intentMap.set("05_add_day_new_appointment - previous", handlePrevious); // selectDate
     intentMap.set("06_add_band_day_new_appointment", getAvailableSlots);
+    intentMap.set("06_add_band_day_new_appointment - previous", handlePrevious); // choseBandDay
     intentMap.set("07_add_time_new_appointment", handleTimeSelection);
     intentMap.set("08_reset_new_appointment", handleReset);
 
-    
     // Gestione modifica appuntamento
     intentMap.set("002_book_number_modify_appointment", searchBooking);
     intentMap.set("003_choose_modify_appointment", modifyBooking);

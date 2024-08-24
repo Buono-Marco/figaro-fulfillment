@@ -176,7 +176,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         // Se l'evento viene aggiunto con successo, informa l'utente
         return {
           success: true,
-          message: `Appuntamento registrato con successo! ID Evento: #${customerPhoneNumber}`,
+          message: `Appuntamento registrato con successo! ID Evento: #${customerPhoneNumber}.`,
         };
       } catch (error) {
         console.log(error);
@@ -188,9 +188,13 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       }
     }
 
-    function handleWelcome() {
+    function handleWelcome(customText) {
+      // Utilizza il valore di customText se è definito, non nullo, e non vuoto; altrimenti usa il testo predefinito
+      let text = typeof customText === 'string' && customText.trim() !== "" 
+        ? customText 
+        : "Benvenuto! Sono Figaro il tuo assistente per gli appuntamenti. Cosa vuoi fare oggi, fissare un nuovo appuntamento o modificarne uno esistente?";
       const fulfillmentMessage = {
-        text: "Benvenuto! Sono Figaro il tuo assistente per gli appuntamenti. Cosa vuoi fare oggi, fissare un nuovo appuntamento o modificarne uno esistente?",
+        text: text,
         buttons: [
           {
             label: "Nuovo",
@@ -211,14 +215,14 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
     }
 
-    function handleReset() {
+    function handleReset(customText) {
       console.log("handleReset - start");
 
       agent.contexts.forEach((context) => {
         agent.context.delete(context.name);
       });
 
-      handleWelcome();
+      handleWelcome(customText);
     }
 
     async function handleFallback() {
@@ -567,7 +571,15 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           appointmentDate,
           endTime
         );
-        agent.add(result.message);
+
+        let message = result.message;
+
+        if (result.success) {
+          handleReset(message +
+            "\nCosa vuoi fare adesso, prenotare un Nuovo Appuntamento o Modificarne uno esistente?");
+        } else {
+          agent.add(message);
+        }
       } else {
         console.log("Calendar is busy, finding alternative slots.");
         const availableSlots = await checkAvailabilityForTimeBand(
@@ -755,7 +767,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           await deleteAppointment(eventId);
           break;
         case "reset chat":
-          handleReset();
+          handleReset(null);
           break;
         default:
           agent.add("Tipo di modifica non riconosciuto. Per favore riprova.");
@@ -775,8 +787,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           eventId: eventId,
         });
 
-        agent.add("L'appuntamento è stato cancellato con successo.");
-        handleReset();
+        handleReset("L'appuntamento è stato cancellato con successo."+
+          "\nCosa vuoi fare adesso, prenotare un Nuovo Appuntamento o Modificarne uno esistente?");
       } catch (error) {
         console.error("Error canceling event: ", error);
         agent.add(
@@ -826,8 +838,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           requestBody: event,
         });
 
-        agent.add(`L'appuntamento è stato modificato con successo!`);
-        handleReset();
+        handleReset("L'appuntamento è stato modificato con successo!" +
+          "\nCosa vuoi fare adesso, prenotare un Nuovo Appuntamento o Modificarne uno esistente?");
       } catch (error) {
         console.error("Error modifying event: ", error);
         agent.add(

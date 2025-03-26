@@ -1,15 +1,11 @@
-// See https://github.com/dialogflow/dialogflow-fulfillment-nodejs
-// for Dialogflow fulfillment library docs, samples, and to report issues
-"use strict";
+const { onRequest } = require('firebase-functions/v2/https');
 
-const functions = require("firebase-functions");
 const { google } = require("googleapis");
 const { WebhookClient, Payload } = require("dialogflow-fulfillment");
 const moment = require("moment-timezone");
-require("dotenv").config();
-const fs = require("fs");
 
 process.env.DEBUG = "dialogflow:*"; // enables lib debugging statement
+const fs = require("fs");
 
 const serviceAccount = JSON.parse(
   fs.readFileSync("serviceAccount.json", "utf8")
@@ -28,12 +24,13 @@ const serviceAccountAuth = new google.auth.JWT({
 
 // Crea il client Google Sheets
 const sheets = google.sheets({ version: "v4", auth: serviceAccountAuth });
+const spreadsheetId = config.spreadsheetId; // looks like "3CCzbMLS990lKVetxD--5nwa_LMPAUIvCxSSldQfj5T2";
+
 // Crea il client Google Calendar
 const calendar = google.calendar({ version: "v3", auth: serviceAccountAuth });
-
 // Enter your calendar ID below and service account JSON below, see https://github.com/dialogflow/bike-shop/blob/master/README.md#calendar-setup
 const calendarId = config.calendarId; // looks like "6ujc6j6rgfk02cp02vg6h38cs0@group.calendar.google.com"
-const spreadsheetId = config.spreadsheetId; // looks like "3CCzbMLS990lKVetxD--5nwa_LMPAUIvCxSSldQfj5T2";
+
 
 // ************************** Start Variabili attività ************************************
 // ****************************************************************************************
@@ -61,7 +58,7 @@ const timezone = "Europe/Rome";
 // ************************** End Variabili attività ************************************
 // **************************************************************************************
 
-exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
+exports.dialogflowFirebaseFulfillmentV2 = onRequest(
   (request, response) => {
     const agent = new WebhookClient({ request, response });
 
@@ -73,7 +70,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         // Se viene interpretata come mezzanotte, correggi a mezzogiorno
         time.hour(12);
       }
-
+      
       // Applica l'ora, i minuti e i secondi da `time` a `date`
       date.hour(time.hour());
       date.minute(time.minute());
@@ -182,8 +179,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         console.log(error);
         return {
           success: false,
-          message:
-            "Si è verificato un errore durante l'aggiunta dell'appuntamento. Per favore, riprova più tardi.",
+          message: "Si è verificato un errore durante l'aggiunta dell'appuntamento. Per favore, riprova più tardi.",
         };
       }
     }
@@ -272,7 +268,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     function chooseServices() {
-      console.log("chooseServices: start");
       const fulfillmentMessage = {
         text: "Scegli tra i seguenti servizi.",
         buttons: [
@@ -301,9 +296,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     function selectDate() {
-      console.log("selectDate - start");
       const fulfillmentMessage = {
-        text: "Seleziona una data dal calendario qui sotto.",
+        text: "Scegli la data.",
         dataPicker: {
           showDays: showPickerDays,
           closingDays: giorniDiChiusura,
@@ -397,6 +391,84 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       );
     }
 
+    async function choseBandDay() {
+      console.log("choseBandDay - start");
+      const context = agent.contexts.find(
+        (context) =>
+          context.name === "ongoing-appointment" ||
+          context.name === "ongoing-modify-appointment"
+      );
+    
+      console.log("choseBandDay - context");
+      
+      const { date, serviziBarbiere } = context.parameters;
+      console.log(`choseBandDay - date: ${date} - serviziBarbiere: ${serviziBarbiere}`);
+
+      const appointmentDate = moment.tz(date, timezone);
+      const durataTotale = calcolaDurataTotale(serviziBarbiere);
+
+      const morningAvailableSlots = await checkAvailabilityForTimeBand(
+        appointmentDate,
+        "Mattina",
+        durataTotale
+      );
+      const morningAvailable = morningAvailableSlots.length > 0;
+      console.log(`choseBandDay - morningAvailable: ${morningAvailable}`);
+
+      const afternoonAvailableSlots = await checkAvailabilityForTimeBand(
+        appointmentDate,
+        "Pomeriggio",
+        durataTotale
+      );
+      const afternoonAvailable = afternoonAvailableSlots.length > 0;
+      console.log(`choseBandDay - afternoonAvailable: ${afternoonAvailable}`);
+
+      let fulfillmentMessage = "";
+
+      if (!morningAvailable && !afternoonAvailable) {
+        fulfillmentMessage = {
+          text: "Non ci sono disponibilità per la data selezionata. Si prega di selezionare una nuova data.",
+          dataPicker: {
+            showDays: showPickerDays,
+            closingDays: giorniDiChiusura,
+          },
+        };
+      } else {
+        fulfillmentMessage = {
+          text: "Quando vuoi prenotare?",
+          buttons: [
+            {
+              label: "Mattina",
+              callBackData: "Mattina",
+              disabled: !morningAvailable,
+              hover: morningAvailable
+                ? null
+                : "nessuna disponibilità in questa fascia oraria",
+            },
+            {
+              label: "Pomeriggio",
+              callBackData: "Pomeriggio",
+              disabled: !afternoonAvailable,
+              hover: afternoonAvailable
+                ? null
+                : "nessuna disponibilità in questa fascia oraria",
+            },
+            {
+              label: "Indietro",
+              callBackData: "Torna alla data",
+            },
+          ],
+        };
+      }
+
+      agent.add(
+        new Payload(agent.UNSPECIFIED, fulfillmentMessage, {
+          sendAsMessage: true,
+          rawPayload: true,
+        })
+      );
+    }
+
     async function checkAvailabilityForTimeBand(date, timeBand, durataTotale) {
       console.log(
         "checkAvailabilityForTimeBand - date: " +
@@ -419,9 +491,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
         return []; // Nessuno slot disponibile, restituisce un array vuoto
       }
 
-      console.log(
-        "checkAvailabilityForTimeBand - start: " + start + " - end: " + end
-      );
+      console.log("checkAvailabilityForTimeBand - start: " + start + " - end: " + end);
 
       const occupiedSlots = await findOccupiedSlots(date);
       const availableSlots = [];
@@ -540,9 +610,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       return occupiedSlots.some((slot) => {
         const slotStart = moment.tz(slot.start, timezone);
         const slotEnd = moment.tz(slot.end, timezone);
-        console.log(
-          `Checking overlap: start=${start.format()}, end=${end.format()}, slotStart=${slotStart.format()}, slotEnd=${slotEnd.format()}`
-        );
         return start.isBefore(slotEnd) && end.isAfter(slotStart);
       });
     }
@@ -754,7 +821,6 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
       switch (tipoModifica) {
         case "Modifica Prenotazione":
-          console.log("modifyBooking: modifica");
           // Imposta il contesto per catturare l'input delle modifiche
           agent.context.set({
             name: "004_service_modify_appointment",
@@ -767,15 +833,12 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           chooseServices();
           break;
         case "Cancella Appuntamento":
-          console.log("modifyBooking: cancellazione");
           await deleteAppointment(eventId);
           break;
         case "reset chat":
-          console.log("modifyBooking: reset");
           handleReset(null);
           break;
         default:
-          console.log("modifyBooking: default");
           agent.add("Tipo di modifica non riconosciuto. Per favore riprova.");
       }
     }
@@ -964,7 +1027,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     intentMap.set("06_add_band_day_new_appointment - previous", handlePrevious); // choseBandDay
     intentMap.set("07_add_time_new_appointment", handleTimeSelection);
     intentMap.set("08_reset_new_appointment", handleReset);
-
+    
     // Gestione modifica appuntamento
     intentMap.set("002_book_number_modify_appointment", searchBooking);
     intentMap.set("003_choose_modify_appointment", modifyBooking);

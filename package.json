@@ -1,0 +1,20 @@
+{
+    "name": "dialogflow-firebase-fulfillment",
+    "description": "Default fulfillment for a Dialogflow agent using Cloud Functions (2nd gen)",
+    "version": "0.0.1",
+    "private": true,
+    "license": "Apache-2.0",
+    "author": "Google Inc.",
+    "engines": {
+      "node": "20"
+    },
+    "dependencies": {
+      "@google-cloud/functions-framework": "^3.0.0",
+      "firebase-admin": "^11.0.0",
+      "firebase-functions": "^4.0.0",
+      "actions-on-google": "^2.2.0",
+      "dialogflow": "^1.0.0",
+      "dialogflow-fulfillment": "^0.6.1",
+      "moment-timezone": "^0.5.33"
+    }
+  }

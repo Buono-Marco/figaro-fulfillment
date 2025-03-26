@@ -12,9 +12,9 @@ const fs = require("fs");
 process.env.DEBUG = "dialogflow:*"; // enables lib debugging statement
 
 const serviceAccount = JSON.parse(
-  fs.readFileSync("your_service_account.json", "utf8")
+  fs.readFileSync("serviceAccount.json", "utf8")
 ); // Starts with {"type": "service_account",...
-const config = JSON.parse(fs.readFileSync("your_config.json", "utf8"));
+const config = JSON.parse(fs.readFileSync("config.json", "utf8"));
 
 // Set up Google Calendar Service account credentials
 const serviceAccountAuth = new google.auth.JWT({
@@ -272,6 +272,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     function chooseServices() {
+      console.log("chooseServices: start");
       const fulfillmentMessage = {
         text: "Scegli tra i seguenti servizi.",
         buttons: [
@@ -300,6 +301,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     }
 
     function selectDate() {
+      console.log("selectDate - start");
       const fulfillmentMessage = {
         text: "Seleziona una data dal calendario qui sotto.",
         dataPicker: {
@@ -752,6 +754,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
 
       switch (tipoModifica) {
         case "Modifica Prenotazione":
+          console.log("modifyBooking: modifica");
           // Imposta il contesto per catturare l'input delle modifiche
           agent.context.set({
             name: "004_service_modify_appointment",
@@ -764,12 +767,15 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
           chooseServices();
           break;
         case "Cancella Appuntamento":
+          console.log("modifyBooking: cancellazione");
           await deleteAppointment(eventId);
           break;
         case "reset chat":
+          console.log("modifyBooking: reset");
           handleReset(null);
           break;
         default:
+          console.log("modifyBooking: default");
           agent.add("Tipo di modifica non riconosciuto. Per favore riprova.");
       }
     }
@@ -896,6 +902,54 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
       console.log("handlePrevious - end");
     }
 
+    async function handlePreviousModify() {
+      console.log("handlePreviousModify - start");
+      const queryText = agent.query;
+      console.log(`handlePreviousModify - queryText: ${queryText}`);
+
+      switch (queryText) {
+        case "Torna ai servizi":
+          console.log("handlePreviousModify - servizi");
+          agent.context.set({
+            name: "004_service_modify_appointment-followup",
+            lifespan: 1,
+            parameters: {
+              action: "004_service_modify_appointment.004_service_modify_appointment-previous",
+            },
+          });
+          chooseServices();
+          break;
+        case "Torna alla data":
+          console.log("handlePreviousModify - data");
+          agent.context.set({
+            name: "005_date_modify_appointment-followup",
+            lifespan: 1,
+            parameters: {
+              action: "005_date_modify_appointment.005_date_modify_appointment-previous",
+            },
+          });
+          selectDate();
+          break;
+        case "Torna alla timeband":
+          console.log("handlePreviousModify - timeband");
+          agent.context.set({
+            name: "006_time_band_modify_appointment-followup",
+            lifespan: 1,
+            parameters: {
+              action: "006_time_band_modify_appointment.006_time_band_modify_appointment-previous",
+            },
+          });
+          await choseBandDay();
+          break;
+        default:
+          agent.add(
+            "Si è verificato un errore durante la ricerca della prenotazione. Per favore riprova più tardi."
+          );
+      }     
+
+      console.log("handlePreviousModify - end");
+    }
+
     // Run the proper function handler based on the matched Dialogflow intent name
     let intentMap = new Map();
 
@@ -915,8 +969,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest(
     intentMap.set("002_book_number_modify_appointment", searchBooking);
     intentMap.set("003_choose_modify_appointment", modifyBooking);
     intentMap.set("004_service_modify_appointment", selectDate);
+    intentMap.set("004_service_modify_appointment - previous", handlePreviousModify); // chooseServices
     intentMap.set("005_date_modify_appointment", choseBandDay);
+    intentMap.set("005_date_modify_appointment - previous", handlePreviousModify); // selectDate
     intentMap.set("006_time_band_modify_appointment", getAvailableSlots);
+    intentMap.set("006_time_band_modify_appointment - previous", handlePreviousModify); // choseBandDay
     intentMap.set("007_time_modify_appointment", modifyTime);
     intentMap.set("008_reset_modify_appointment", handleReset);
 
